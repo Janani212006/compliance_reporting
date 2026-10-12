@@ -1,0 +1,14 @@
+db:
+  host: "localhost"
+  port: "3306"
+  database: "compliance_db"
+  user: "root"
+  password: "CHANGE_ME"
+  timezone: "Asia/Kolkata"
+report:
+  entityCode: "ENT0091"
+  entityName: "Bright Financial Services Ltd"
+  type: "STR"
+extract:
+  fetchSize: "1000"
+  pageSize: "2"

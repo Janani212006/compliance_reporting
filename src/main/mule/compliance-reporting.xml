@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="4173bbbb-0789-4012-a12b-4be587ae272d" >
+		<db:my-sql-connection host="${db.host}" port="${db.port}" user="${db.user}" password="${db.password}" database="${db.database}" >
+			<db:connection-properties >
+				<db:connection-property key="serverTimezone" value="${db.timezone}" />
+				<db:connection-property key="connectionTimeZone" value="${db.timezone}" />
+				<db:connection-property key="useCursorFetch" value="true" />
+			</db:connection-properties>
+		</db:my-sql-connection>
+	</db:config>
+	<global-property doc:name="Global Property" doc:id="5cad4778-deb8-4582-ab99-7dc9c0d572cb" name="env" value="dev" />
+	<configuration-properties doc:name="Configuration properties" doc:id="ae4c7357-eb98-4151-972d-e67d820f0c22" file="config-${env}.yaml" />
+	<flow name="compliance-reportingFlow" doc:id="adc684aa-34c2-4446-b71a-81463fc3ec3b" >
+		<scheduler doc:name="Scheduler" doc:id="c161d474-2ea5-4042-8362-5095dbd51422" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="60000"/>
+			</scheduling-strategy>
+		</scheduler>
+		<db:select doc:name="Select" doc:id="3587a40d-4920-4550-80f0-1c7f3f4bf84d" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT DATE_FORMAT(last_reported_upto, '%Y-%m-%d %H:%i:%s') AS upto,
+       last_sequence_number
+FROM compliance_report_control
+WHERE entity_code = :entity AND report_type = :rtype]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{ entity: p('report.entityCode'), rtype: p('report.type') }]]]></db:input-parameters>
+		</db:select>
+		<set-variable value='#[{ start: payload[0].upto, end: ((payload[0].upto as LocalDateTime {format: "yyyy-MM-dd HH:mm:ss"}) + |P1D|) as String {format: "yyyy-MM-dd HH:mm:ss"} }]' doc:name="Set Variable" doc:id="71a7de8a-7033-4acc-98c9-51aef5b4911f" variableName="period"/>
+		<db:select doc:name="Select flagged transactions" doc:id="58eada39-398c-4a14-923e-c121e4711555" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT t.transaction_id, t.transaction_datetime, t.account_number,
+       c.customer_id, c.customer_name, c.customer_type,
+       t.transaction_type, t.channel, t.currency, t.amount,
+       t.counterparty_name, t.counterparty_country,
+       f.flag_code, f.flag_reason, f.flagged_at, f.reviewed_by, f.review_status
+FROM transactions t
+JOIN transaction_flags f ON f.transaction_id = t.transaction_id
+JOIN customers c ON c.customer_id = t.customer_id
+WHERE f.flagged_at >= :periodStart
+  AND f.flagged_at <  :periodEnd
+  AND f.report_status = 'PENDING_REPORT'
+ORDER BY f.flagged_at, t.transaction_id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{ periodStart: vars.period.start, periodEnd: vars.period.end }]]]></db:input-parameters>
+		</db:select>
+		<foreach doc:name="For Each" doc:id="75906f9f-3f4b-4922-aad2-2cf7249d8c68" batchSize="${extract.pageSize}">
+			<logger level="INFO" doc:name="Logger" doc:id="03059014-1680-4c09-8b5b-77d11d56d6d5" message='#["Page " ++ (vars.counter as String) ++ ": rows=" ++ (sizeOf(payload) as String) ++ ", first=" ++ payload[0].transaction_id]'/>
+		</foreach>
+		<logger level="INFO" doc:name="Logger" doc:id="190afee5-1d74-461e-9544-c61de4756f77" message="#[vars.period]"/>
+	</flow>
+</mule>
